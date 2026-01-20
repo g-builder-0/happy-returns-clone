@@ -1,3 +1,7 @@
 from django.contrib import admin
+from .models import Merchant, Consumer, Return, ReturnItem
 
-# Register your models here.
+admin.site.register(Merchant)
+admin.site.register(Consumer)
+admin.site.register(Return)
+admin.site.register(ReturnItem)
