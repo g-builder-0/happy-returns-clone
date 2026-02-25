@@ -66,13 +66,13 @@ class ReturnModelTest(TestCase):
             order_number="ORD-12345",
             authorization_code="RET-ABC123",
             refund_amount=99.99,
-            status=Return.STATUS_INITIATED
+            status=Return.Status.INITIATED
         )
 
     def test_return_creation(self):
         """Test return is created correctly"""
         self.assertEqual(self.return_obj.order_number, "ORD-12345") #QUESTION: why do we keep pretentiously using .assertEqual() rather than just '='?
-        self.assertEqual(self.return_obj.status, Return.STATUS_INITIATED)
+        self.assertEqual(self.return_obj.status, Return.Status.INITIATED)
         self.assertEqual(self.return_obj.refund_amount, 99.99)
 
     def test_return_with_items(self):
@@ -83,7 +83,7 @@ class ReturnModelTest(TestCase):
             product_sku="SKU-123",
             quantity=2,
             unit_price=49.99,
-            return_reason=ReturnItem.REASON_UNWANTED
+            return_reason=ReturnItem.ReturnReason.UNWANTED
         )
         self.assertEqual(self.return_obj.items.count(), 1) #QUESTION: Why are we asking if the quantity is 1 when we know it's 2?
         self.assertEqual(item.product_name, "Test Product")
@@ -195,7 +195,7 @@ class ReturnAPITest(APITestCase):
             order_number='ORD-1',
             authorization_code='RET-1',
             refund_amount=50.00,
-            status=Return.STATUS_INITIATED
+            status=Return.Status.INITIATED
         )
         Return.objects.create(
             merchant=self.merchant,
@@ -203,7 +203,7 @@ class ReturnAPITest(APITestCase):
             order_number='ORD-2',
             authorization_code='RET-2',
             refund_amount=75.00,
-            status=Return.STATUS_COMPLETED
+            status=Return.Status.COMPLETED
         )
 
         response = self.client.get('/api/returns/?status=INITIATED')
@@ -218,13 +218,13 @@ class ReturnAPITest(APITestCase):
             order_number='ORD-1',
             authorization_code='RET-1',
             refund_amount=50.00,
-            status=Return.STATUS_INITIATED
+            status=Return.Status.INITIATED
         )
 
         response = self.client.post(f'/api/returns/{return_obj.id}/approve/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         return_obj.refresh_from_db() #QUESTION: What does .refresh_from_db() do? Don't we want to keep the database as it is so that we can test if the status=STATUS_AUTHORIZED?
-        self.assertEqual(return_obj.status, Return.STATUS_AUTHORIZED) #QUESTION: Do we expect this to succeed because we already ran this line response = self.client.post(f'/api/returns/{return_obj.id}/approve/')?
+        self.assertEqual(return_obj.status, Return.Status.AUTHORIZED) #QUESTION: Do we expect this to succeed because we already ran this line response = self.client.post(f'/api/returns/{return_obj.id}/approve/')?
 
     def test_cancel_return(self):
         """Test cancel action"""
@@ -234,10 +234,10 @@ class ReturnAPITest(APITestCase):
             order_number='ORD-1',
             authorization_code='RET-1',
             refund_amount=50.00,
-            status=Return.STATUS_INITIATED
+            status=Return.Status.INITIATED
         )
 
         response = self.client.post(f'/api/returns/{return_obj.id}/cancel/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         return_obj.refresh_from_db()
-        self.assertEqual(return_obj.status, Return.STATUS_CANCELLED) #QUESTION: So if a return gets cancelled, it doesn't get deleted? It just sits in the database with a status of STATUS_CANCELLED?
+        self.assertEqual(return_obj.status, Return.Status.CANCELLED) #QUESTION: So if a return gets cancelled, it doesn't get deleted? It just sits in the database with a status of STATUS_CANCELLED?
