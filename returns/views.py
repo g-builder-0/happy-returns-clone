@@ -1,12 +1,15 @@
 from rest_framework import viewsets
+from rest_framework.permissions import IsAuthenticated
+from .permissions import IsMerchantOwner, IsReturnBarStaff, IsConsumerOwner
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from .models import Merchant, Consumer, Return, ReturnItem, ReturnBarLocation, ReturnLabel, ItemConditionAssessment, \
-    RefundTransaction
+    RefundTransaction, WebhookDelivery, WebhookEndpoint
 from .serializers import MerchantSerializer, ConsumerSerializer, ReturnSerializer, ReturnBarLocationSerializer, \
     ReturnLabelSerializer, ItemConditionAssessmentSerializer, RefundTransactionSerializer
+from .serializers_webhooks import WebhookEndpointSerializer, WebhookDeliverySerializer
 
 
 class MerchantViewSet(viewsets.ModelViewSet):
@@ -31,7 +34,26 @@ class ReturnViewSet(viewsets.ModelViewSet):
     """
     queryset = Return.objects.select_related('merchant', 'consumer').prefetch_related('items').all()
     serializer_class = ReturnSerializer
+    permission_classes = [IsAuthenticated, IsMerchantOwner]
     filterset_fields = ['status', 'merchant']
+
+    def get_queryset(self):
+        """
+        CRITICAL SECURITY:
+        Automatically filter to only show returns for user's merchant.
+        Prevents cross-merchant data access.
+        """
+        return Return.objects.filter(
+            merchant=self.request.user.profile.merchant
+        ).select_related('merchant', 'consumer').prefetch_related('items')
+
+    def perform_create(self, serializer):
+        """
+        CRITICAL SECURITY:
+        Force merchant to be the authenticated user's merchant.
+        Prevents attackers from creating returns for other merchants.
+        """
+        serializer.save(merchant=self.request.user.profile.merchant)
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
@@ -86,6 +108,25 @@ class ReturnViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+class ConsumerReturnViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Consumer-facing endpoint for tracking their own returns.
+    Consumers can only VIEW their returns, not create/edit them.
+    """
+    queryset = Return.objects.select_related('merchant', 'consumer').all()
+    serializer_class = ReturnSerializer
+    permission_classes = [IsAuthenticated, IsConsumerOwner]
+
+    def get_queryset(self):
+        """
+        CRITICAL SECURITY:
+        Consumers only see THEIR OWN returns.
+        """
+        return Return.objects.filter(
+            consumer=self.request.user.profile
+        ).select_related('merchant', 'consumer').prefetch_related('items')
+
+
 class ReturnBarLocationViewSet(viewsets.ModelViewSet):
     """ViewSet for return bar locations"""
     queryset = ReturnBarLocation.objects.all()
@@ -103,6 +144,7 @@ class ItemConditionAssessmentViewSet(viewsets.ModelViewSet):
     """ViewSet for item condition assessments"""
     queryset = ItemConditionAssessment.objects.select_related('return_item').all()
     serializer_class = ItemConditionAssessmentSerializer
+    permission_classes = [IsAuthenticated, IsReturnBarStaff]
 
 
 class RefundTransactionViewSet(viewsets.ModelViewSet):
@@ -110,3 +152,47 @@ class RefundTransactionViewSet(viewsets.ModelViewSet):
     queryset = RefundTransaction.objects.select_related('return_obj').all()
     serializer_class = RefundTransactionSerializer
     filterset_fields = ['return_obj', 'status', 'refund_method']
+
+
+class WebhookEndpointViewSet(viewsets.ModelViewSet):
+    """
+    Merchants manage their webhook endpoints.
+    """
+    queryset = WebhookEndpoint.objects.all()
+    serializer_class = WebhookEndpointSerializer
+    permission_classes = [IsAuthenticated, IsMerchantOwner]
+
+    def get_queryset(self):
+        """
+        CRITICAL SECURITY:
+        Merchants only see their own webhook endpoints.
+        """
+        return WebhookEndpoint.objects.filter(
+            merchant=self.request.user.profile.merchant
+        )
+
+    def perform_create(self, serializer):
+        """
+        CRITICAL SECURITY:
+        Force merchant to be the authenticated user's merchant.
+        """
+        serializer.save(merchant=self.request.user.profile.merchant)
+
+
+class WebhookDeliveryViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Merchants view webhook delivery logs (read-only).
+    """
+    queryset = WebhookDelivery.objects.select_related('webhook_endpoint').all()
+    serializer_class = WebhookDeliverySerializer
+    permission_classes = [IsAuthenticated, IsMerchantOwner]
+    filterset_fields = ['status', 'event_type']
+
+    def get_queryset(self):
+        """
+        CRITICAL SECURITY:
+        Merchants only see delivery logs for their own webhooks.
+        """
+        return WebhookDelivery.objects.filter(
+            webhook_endpoint__merchant=self.request.user.profile.merchant
+        ).select_related('webhook_endpoint')

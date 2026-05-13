@@ -131,7 +131,7 @@ class ReturnItemSerializer(serializers.ModelSerializer):
             'unit_price',
             'return_reason',
             'condition',
-            'assessments',  # Now includes nested assessments!
+            'assessments',
             'created_at'
         ]
         read_only_fields = ['id', 'created_at']

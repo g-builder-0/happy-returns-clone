@@ -1,5 +1,5 @@
 from django.db import models
-
+from django.contrib.auth.models import User
 
 class Merchant(models.Model):
     """Merchant/business that uses the returns platform"""
@@ -42,8 +42,6 @@ class Return(models.Model):
         PROCESSING = 'PROCESSING', 'Processing'
         COMPLETED = 'COMPLETED', 'Completed'
         CANCELLED = 'CANCELLED', 'Cancelled'
-
-
 
     # Relationships
     merchant = models.ForeignKey(Merchant, on_delete=models.CASCADE, related_name='returns')
@@ -269,3 +267,90 @@ class RefundTransaction(models.Model):
             raise ValidationError(
                 f'Total refunds (${total_with_this}) would exceed return amount (${self.return_obj.refund_amount})'
             )
+
+
+class UserProfile(models.Model):
+    """
+    Extends Django's User model to add merchant association and role.
+    Enables multi-tenant security.
+    """
+
+    class Role(models.TextChoices):
+        MERCHANT_ADMIN = 'MERCHANT_ADMIN', 'Merchant Admin'
+        MERCHANT_STAFF = 'MERCHANT_STAFF', 'Merchant Staff'
+        RETURN_BAR_STAFF = 'RETURN_BAR_STAFF', 'Return Bar Staff'
+        CONSUMER = 'CONSUMER', 'Consumer'
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.CASCADE,
+        related_name='users',
+        null=True,
+        blank=True  # Consumers won't have a merchant
+    )
+    role = models.CharField(max_length=20, choices=Role.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username} - {self.role}"
+
+
+class WebhookEndpoint(models.Model):
+    """
+    Merchant's webhook configuration for receiving return notifications.
+    """
+
+    class EventType(models.TextChoices):
+        RETURN_CREATED = 'RETURN_CREATED', 'Return Created'
+        RETURN_APPROVED = 'RETURN_APPROVED', 'Return Approved'
+        RETURN_DROPPED_OFF = 'RETURN_DROPPED_OFF', 'Return Dropped Off'
+        RETURN_COMPLETED = 'RETURN_COMPLETED', 'Return Completed'
+        RETURN_CANCELLED = 'RETURN_CANCELLED', 'Return Cancelled'
+        REFUND_COMPLETED = 'REFUND_COMPLETED', 'Refund Completed'
+
+    merchant = models.ForeignKey(Merchant, on_delete=models.CASCADE, related_name='webhook_endpoints')
+    url = models.URLField(max_length=500, help_text="Merchant's webhook URL")
+    events = models.JSONField(default=list, help_text="List of event types to subscribe to")
+    is_active = models.BooleanField(default=True)
+    secret = models.CharField(max_length=100, help_text="Secret for HMAC signature verification")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.merchant.name} - {self.url}"
+
+
+class WebhookDelivery(models.Model):
+    """
+    Log of webhook delivery attempts with retry tracking.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        SUCCESS = 'SUCCESS', 'Success'
+        FAILED = 'FAILED', 'Failed'
+
+    webhook_endpoint = models.ForeignKey(WebhookEndpoint, on_delete=models.CASCADE, related_name='deliveries')
+    event_type = models.CharField(max_length=50)
+    payload = models.JSONField(help_text="Event data sent to merchant")
+    response_status = models.IntegerField(null=True, blank=True, help_text="HTTP status code from merchant")
+    response_body = models.TextField(blank=True)
+    attempt_count = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    failed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.event_type} - {self.status}"
